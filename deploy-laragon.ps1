@@ -1,83 +1,73 @@
 #Requires -Version 5.1
-<#
-.SYNOPSIS
-    Script de deploy para Apuestas Deportivas en Laragon (Windows)
-.DESCRIPTION
-    Clona o actualiza el proyecto, instala dependencias, configura
-    el entorno y ejecuta migraciones automáticamente.
-.EXAMPLE
-    .\deploy-laragon.ps1
-    .\deploy-laragon.ps1 -Fresh        # Reinstalacion completa
-    .\deploy-laragon.ps1 -SkipSeed     # Actualizar sin ejecutar seeders
-#>
 
 param(
     [switch]$Fresh,
     [switch]$SkipSeed,
-    [string]$Branch = "main"
+    [string]$Branch = "claude/laravel-sports-betting-bvty6"
 )
 
 $ErrorActionPreference = "Stop"
 
-# ── Colores ─────────────────────────────────────────────────────────────────
-function Write-Step  { param($msg) Write-Host "`n[>>] $msg" -ForegroundColor Cyan }
-function Write-OK    { param($msg) Write-Host "[OK] $msg"   -ForegroundColor Green }
-function Write-Warn  { param($msg) Write-Host "[!!] $msg"   -ForegroundColor Yellow }
-function Write-Fail  { param($msg) Write-Host "[XX] $msg"   -ForegroundColor Red; exit 1 }
+function Write-Step { param($msg) Write-Host "" ; Write-Host "[>>] $msg" -ForegroundColor Cyan }
+function Write-OK   { param($msg) Write-Host "[OK] $msg" -ForegroundColor Green }
+function Write-Warn { param($msg) Write-Host "[!!] $msg" -ForegroundColor Yellow }
+function Write-Fail { param($msg) Write-Host "[XX] $msg" -ForegroundColor Red ; exit 1 }
 
-# ── Banner ───────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "  =============================================" -ForegroundColor Yellow
-Write-Host "   Apuestas Deportivas — Deploy para Laragon  " -ForegroundColor Yellow
-Write-Host "  =============================================" -ForegroundColor Yellow
+Write-Host "  ============================================" -ForegroundColor Yellow
+Write-Host "  Apuestas Deportivas - Deploy para Laragon  " -ForegroundColor Yellow
+Write-Host "  ============================================" -ForegroundColor Yellow
 Write-Host ""
 
-# ── Configuración ────────────────────────────────────────────────────────────
-$ProjectName  = "ApuestasDeportivas"
-$LaragonRoot  = "C:\laragon\www"
-$ProjectPath  = Join-Path $LaragonRoot $ProjectName
-$RepoUrl      = "https://github.com/jlmg22204/ApuestasDeportivas.git"
+$ProjectName = "ApuestasDeportivas"
+$LaragonRoot = "C:\laragon\www"
+$ProjectPath = Join-Path $LaragonRoot $ProjectName
+$RepoUrl     = "https://github.com/jlmg22204/ApuestasDeportivas.git"
 
-# ── Verificar herramientas ───────────────────────────────────────────────────
+# Verificar herramientas
 Write-Step "Verificando herramientas..."
 
-@("php", "composer", "git") | ForEach-Object {
-    if (-not (Get-Command $_ -ErrorAction SilentlyContinue)) {
-        Write-Fail "$_ no está en PATH. Abre la terminal de Laragon o agrega Laragon al PATH del sistema."
+foreach ($tool in @("php", "composer", "git")) {
+    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+        Write-Fail "$tool no encontrado en PATH. Abre la terminal de Laragon."
     }
-    Write-OK "$_ encontrado"
+    Write-OK "$tool encontrado"
 }
 
-$phpVersion = php -r "echo PHP_VERSION;"
-Write-OK "PHP $phpVersion"
+$phpVer = php -r "echo PHP_VERSION;"
+Write-OK "PHP $phpVer"
 
-# ── Clonar o actualizar ──────────────────────────────────────────────────────
-Write-Step "Preparando código fuente..."
+# Clonar o actualizar repo
+Write-Step "Preparando codigo fuente..."
 
 $isNewInstall = $false
 
 if ($Fresh -and (Test-Path $ProjectPath)) {
-    Write-Warn "Modo Fresh: eliminando instalación anterior..."
+    Write-Warn "Modo Fresh: eliminando instalacion anterior..."
     Remove-Item $ProjectPath -Recurse -Force
 }
 
-if (Test-Path (Join-Path $ProjectPath ".git")) {
-    Write-OK "Proyecto existente detectado — actualizando desde $Branch..."
+$gitDir = Join-Path $ProjectPath ".git"
+
+if (Test-Path $gitDir) {
+    Write-OK "Proyecto existente detectado. Actualizando rama $Branch..."
     Set-Location $ProjectPath
-    git fetch origin 2>&1 | Out-Null
-    git checkout $Branch 2>&1
-    git pull origin $Branch 2>&1
+    git fetch origin
+    git checkout $Branch
+    git pull origin $Branch
 } else {
-    Write-OK "Clonando repositorio..."
-    if (-not (Test-Path $LaragonRoot)) { New-Item -ItemType Directory -Path $LaragonRoot | Out-Null }
+    Write-OK "Clonando repositorio desde rama $Branch..."
+    if (-not (Test-Path $LaragonRoot)) {
+        New-Item -ItemType Directory -Path $LaragonRoot | Out-Null
+    }
     git clone -b $Branch $RepoUrl $ProjectPath
     Set-Location $ProjectPath
     $isNewInstall = $true
 }
 
-Write-OK "Código fuente listo en $ProjectPath"
+Write-OK "Codigo fuente listo en $ProjectPath"
 
-# ── Dependencias ─────────────────────────────────────────────────────────────
+# Dependencias Composer
 Write-Step "Instalando dependencias de Composer..."
 composer install --no-dev --optimize-autoloader --no-interaction
 if ($LASTEXITCODE -ne 0) {
@@ -86,45 +76,42 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-OK "Dependencias instaladas"
 
-# ── Archivo .env ─────────────────────────────────────────────────────────────
+# Configurar .env
 Write-Step "Configurando entorno..."
 
 if (-not (Test-Path ".env")) {
     Copy-Item ".env.example" ".env"
-    Write-OK ".env creado desde .env.example"
-
-    # Configurar valores para Laragon
-    $envContent = Get-Content ".env" -Raw
-    $envContent = $envContent -replace 'APP_NAME=.*',      'APP_NAME="Apuestas Deportivas"'
-    $envContent = $envContent -replace 'APP_URL=.*',       "APP_URL=http://$ProjectName.test"
-    $envContent = $envContent -replace 'DB_CONNECTION=.*', 'DB_CONNECTION=sqlite'
-    Set-Content ".env" $envContent
-    Write-OK ".env configurado para Laragon"
+    $env = Get-Content ".env" -Raw
+    $env = $env -replace 'APP_NAME=.*',      'APP_NAME="Apuestas Deportivas"'
+    $env = $env -replace 'APP_URL=.*',       "APP_URL=http://$ProjectName.test"
+    $env = $env -replace 'DB_CONNECTION=.*', 'DB_CONNECTION=sqlite'
+    Set-Content ".env" $env
+    Write-OK ".env creado y configurado para Laragon"
 } else {
-    Write-OK ".env ya existe — no se sobreescribe"
+    Write-OK ".env ya existe, no se sobreescribe"
 }
 
-# ── Base de datos SQLite ─────────────────────────────────────────────────────
-$sqlitePath = "database\database.sqlite"
-if (-not (Test-Path $sqlitePath)) {
-    New-Item $sqlitePath -ItemType File | Out-Null
+# Base de datos SQLite
+$dbPath = "database\database.sqlite"
+if (-not (Test-Path $dbPath)) {
+    New-Item $dbPath -ItemType File | Out-Null
     Write-OK "Archivo SQLite creado"
 }
 
-# ── APP_KEY ──────────────────────────────────────────────────────────────────
-$envKey = (Get-Content ".env" | Select-String "^APP_KEY=base64:").ToString()
-if (-not $envKey) {
-    Write-Step "Generando clave de aplicación..."
+# APP_KEY
+$keyLine = Get-Content ".env" | Where-Object { $_ -match "^APP_KEY=base64:" }
+if (-not $keyLine) {
+    Write-Step "Generando clave de aplicacion..."
     php artisan key:generate --ansi
-    Write-OK "APP_KEY generada"
 }
 
-# ── Migraciones ───────────────────────────────────────────────────────────────
+# Migraciones
 Write-Step "Ejecutando migraciones..."
 
 if ($Fresh -or $isNewInstall) {
     if ($SkipSeed) {
         php artisan migrate:fresh --force
+        Write-OK "Migraciones ejecutadas (sin seeders)"
     } else {
         php artisan migrate:fresh --seed --force
         Write-OK "Migraciones y seeders ejecutados"
@@ -134,35 +121,34 @@ if ($Fresh -or $isNewInstall) {
     Write-OK "Migraciones aplicadas"
 }
 
-# ── Storage link ──────────────────────────────────────────────────────────────
+# Storage link
 Write-Step "Creando enlace de storage..."
 php artisan storage:link --force 2>&1 | Out-Null
 Write-OK "Storage link creado"
 
-# ── Optimizar ────────────────────────────────────────────────────────────────
-Write-Step "Optimizando la aplicación..."
+# Optimizar cache
+Write-Step "Optimizando la aplicacion..."
 php artisan optimize:clear | Out-Null
-php artisan config:cache  | Out-Null
-php artisan route:cache   | Out-Null
-php artisan view:cache    | Out-Null
+php artisan config:cache   | Out-Null
+php artisan route:cache    | Out-Null
+php artisan view:cache     | Out-Null
 Write-OK "Cache optimizada"
 
-# ── Resumen ───────────────────────────────────────────────────────────────────
+# Resumen final
 Write-Host ""
-Write-Host "  =============================================" -ForegroundColor Green
-Write-Host "   Deploy completado exitosamente!" -ForegroundColor Green
-Write-Host "  =============================================" -ForegroundColor Green
+Write-Host "  ============================================" -ForegroundColor Green
+Write-Host "  Deploy completado exitosamente!            " -ForegroundColor Green
+Write-Host "  ============================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  URL del proyecto : " -NoNewline; Write-Host "http://$ProjectName.test" -ForegroundColor Cyan
-Write-Host "  Ruta local       : " -NoNewline; Write-Host $ProjectPath -ForegroundColor Cyan
+Write-Host "  URL:   http://$ProjectName.test" -ForegroundColor Cyan
+Write-Host "  Ruta:  $ProjectPath" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Credenciales de acceso:"
-Write-Host "    Admin   : admin@apuestas.com / password" -ForegroundColor Yellow
-Write-Host "    Usuario : demo@apuestas.com  / password" -ForegroundColor Yellow
+Write-Host "  Acceso Admin  : admin@apuestas.com / password" -ForegroundColor Yellow
+Write-Host "  Acceso Usuario: demo@apuestas.com  / password" -ForegroundColor Yellow
 Write-Host ""
 
 if ($isNewInstall) {
-    Write-Host "  NOTA: Laragon crea el virtual host automaticamente." -ForegroundColor DarkCyan
-    Write-Host "        Si no aparece, reinicia Laragon." -ForegroundColor DarkCyan
+    Write-Host "  NOTA: Laragon genera el virtual host automaticamente." -ForegroundColor DarkCyan
+    Write-Host "        Si no aparece en el menu, reinicia Laragon." -ForegroundColor DarkCyan
     Write-Host ""
 }
